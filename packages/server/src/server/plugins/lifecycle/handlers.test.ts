@@ -98,3 +98,59 @@ test("session-open hooks reject changes to session identity instead of silently 
     ),
   ).rejects.toThrow("agent.session_open hooks can only change env");
 });
+
+const promptRequest = {
+  agent: {
+    id: "agent",
+    workspaceId: null,
+    parentAgentId: null,
+    provider: "eslepe-claude",
+    cwd: "/project",
+    title: null,
+  },
+  source: { kind: "agent-message", agentId: "worker", title: null, serverId: null },
+  text: "a < b",
+  delivery: "envelope",
+} as const;
+
+test("prompt hooks can change text and delivery", async () => {
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.prompt", ({ request }) => {
+    return request.agent.provider.startsWith("eslepe-")
+      ? { ...request, text: "changed", delivery: "plain" }
+      : undefined;
+  });
+  expect(await hooks.invoke("operation", "before", "agent.prompt", promptRequest, paseo)).toEqual({
+    ...promptRequest,
+    text: "changed",
+    delivery: "plain",
+  });
+});
+
+test("prompt hooks reject changes to the recipient or source", async () => {
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.prompt", ({ request }) => ({
+    ...request,
+    agent: { ...request.agent, provider: "other" },
+  }));
+  await expect(
+    hooks.invoke("operation", "before", "agent.prompt", promptRequest, paseo),
+  ).rejects.toThrow("agent.prompt hooks can only change text and delivery");
+
+  const sourceHooks = new PluginHookHandlers(() => {});
+  sourceHooks.before("agent.prompt", ({ request }) => ({
+    ...request,
+    source: { ...request.source, agentId: "spoofed" },
+  }));
+  await expect(
+    sourceHooks.invoke("operation", "before", "agent.prompt", promptRequest, paseo),
+  ).rejects.toThrow("agent.prompt hooks can only change text and delivery");
+});
+
+test("prompt hooks reject unknown fields", async () => {
+  const hooks = new PluginHookHandlers(() => {});
+  hooks.before("agent.prompt", ({ request }) => ({ ...request, extra: true }) as never);
+  await expect(
+    hooks.invoke("operation", "before", "agent.prompt", promptRequest, paseo),
+  ).rejects.toThrow();
+});

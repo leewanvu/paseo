@@ -882,6 +882,7 @@ type PluginTurnOutcome =
 | -------------------- | ----------------------------------------------------------------------- | --------------------------------------- |
 | `agent.create`       | `config`, optional `env`                                                | Public agent config except `cwd`; `env` |
 | `agent.session_open` | `agentId`, `workspaceId`, `provider`, `cwd`, `reason`, `purpose`, `env` | Only `env`                              |
+| `agent.prompt`       | `agent`, `source`, `text`, `delivery`                                   | Only `text` and `delivery`              |
 | `workspace.create`   | `source`, optional `title`, `firstAgentContext`                         | Entire explicit creation request        |
 
 **`agent.create.config`** uses `AgentSessionConfig`:
@@ -915,6 +916,34 @@ type PluginTurnOutcome =
 | `reason`      | `create`, `resume`, `refresh`, `import`                                                                                 |
 | `purpose`     | `interactive`, `history`                                                                                                |
 | `env`         | Launch override map; excludes the daemon's inherited environment. Replace the map to add, replace, or remove overrides. |
+
+**`agent.prompt`** runs for every prompt one agent sends to another, before Paseo wraps it in the
+`<paseo-system>` envelope: `send_agent_prompt` (including queued delivery), the initial prompt of
+`create_agent`, and finish, error, and permission notifications. Human prompts and schedule fires
+do not run it.
+
+```ts
+server.before("agent.prompt", ({ request }) => {
+  if (!request.agent.provider.startsWith("eslepe-")) return;
+  return { ...request, delivery: "plain" };
+});
+```
+
+| Field      | Values                                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------------------- |
+| `agent`    | The recipient: `id`, `workspaceId`, `parentAgentId`, `provider`, `cwd`, `title`                                     |
+| `source`   | `kind` (`agent-message` or `agent-notification`), `agentId`, `title`, `serverId`, and `event` for notifications     |
+| `text`     | Raw, unescaped body. Text attachments are already rendered into it; image blocks skip the hook                      |
+| `delivery` | `envelope` (default) wraps `text`; `plain` sends `text` as an ordinary prompt, recorded and shown as a user message |
+
+A hook that changes `agent` or `source` fails. With no `agent.prompt` hook registered, prompts are
+delivered unchanged. Queued messages are prepared one by one, in order, before they are joined, so
+one batch can mix plain and enveloped messages.
+
+If the hook throws or times out, the prompt is not delivered. A direct send and an initial prompt
+fail with the error. In a queued batch only that message is rejected; the others are delivered. A
+notification is retried by its subscription. Do not wait on a send to the same recipient from
+inside the callback.
 
 ### Ordering and returned values
 
@@ -957,7 +986,7 @@ saved; environment overrides are not persisted with it.
 
 | Plugin                                                                                                 | Includes                                                                     |
 | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| [lifecycle-logger](https://github.com/getpaseo/paseo/tree/main/plugin-examples/lifecycle-logger)       | All eleven hooks; JSON logs with environment values redacted                 |
+| [lifecycle-logger](https://github.com/getpaseo/paseo/tree/main/plugin-examples/lifecycle-logger)       | All twelve hooks; JSON logs with environment values redacted                 |
 | [lifecycle-actions](https://github.com/getpaseo/paseo/tree/main/plugin-examples/lifecycle-actions)     | Follow-ups, permissions, environment, provider switching, worktree selection |
 | [agent-configuration](https://github.com/getpaseo/paseo/tree/main/plugin-examples/agent-configuration) | MCP injection and Codex sandbox/approval options                             |
 

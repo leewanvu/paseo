@@ -26,7 +26,12 @@ export const lifecycleEventNames = [
   "workspace.created",
   "workspace.archived",
 ] as const;
-export const beforeHookNames = ["agent.create", "agent.session_open", "workspace.create"] as const;
+export const beforeHookNames = [
+  "agent.create",
+  "agent.session_open",
+  "agent.prompt",
+  "workspace.create",
+] as const;
 
 const beforeSchemas = {
   "agent.create": CreateAgentRequestMessageSchema.pick({ config: true, env: true }).strict(),
@@ -41,6 +46,41 @@ const beforeSchemas = {
       env: z.record(z.string(), z.string()),
     })
     .strict(),
+  "agent.prompt": z
+    .object({
+      agent: z
+        .object({
+          id: z.string(),
+          workspaceId: z.string().nullable(),
+          parentAgentId: z.string().nullable(),
+          provider: z.string(),
+          cwd: z.string(),
+          title: z.string().nullable(),
+        })
+        .strict(),
+      source: z.discriminatedUnion("kind", [
+        z
+          .object({
+            kind: z.literal("agent-message"),
+            agentId: z.string(),
+            title: z.string().nullable(),
+            serverId: z.string().nullable(),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("agent-notification"),
+            agentId: z.string(),
+            title: z.string().nullable(),
+            serverId: z.string().nullable(),
+            event: z.enum(["finished", "errored", "permission-required", "closed"]),
+          })
+          .strict(),
+      ]),
+      text: z.string(),
+      delivery: z.enum(["envelope", "plain"]),
+    })
+    .strict(),
   "workspace.create": WorkspaceCreateRequestSchema.omit({ type: true, requestId: true }).strict(),
 };
 
@@ -53,6 +93,8 @@ export interface PluginLifecycle {
     name: Name,
     request: PluginBeforeRequests[Name],
   ): Promise<PluginBeforeRequests[Name]>;
+  /** True when at least one plugin registered the before hook. Lets hot paths skip the round trip. */
+  hasBefore?(name: keyof PluginBeforeRequests): boolean;
 }
 
 export function validateBeforeRequest<Name extends keyof PluginBeforeRequests>(
@@ -147,6 +189,16 @@ export function validateBeforeResult<Name extends keyof PluginBeforeRequests>(
       previous.purpose !== next.purpose
     ) {
       throw new Error("agent.session_open hooks can only change env");
+    }
+  }
+  if (name === "agent.prompt") {
+    const previous = beforeSchemas["agent.prompt"].parse(input);
+    const next = beforeSchemas["agent.prompt"].parse(result);
+    if (
+      JSON.stringify(previous.agent) !== JSON.stringify(next.agent) ||
+      JSON.stringify(previous.source) !== JSON.stringify(next.source)
+    ) {
+      throw new Error("agent.prompt hooks can only change text and delivery");
     }
   }
   if (name === "agent.create") {

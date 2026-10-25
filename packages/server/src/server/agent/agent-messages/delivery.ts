@@ -2,6 +2,7 @@ import type { PromptDispatchDisposition } from "../agent-prompt.js";
 import { randomUUID } from "node:crypto";
 import type { AgentPromptInput, AgentPromptContentBlock } from "../agent-sdk-types.js";
 import { prepareAgentMessage, type AgentPromptSource } from "./envelope.js";
+import type { AgentMessagePreparation } from "./prepare.js";
 
 interface Message {
   recipientId: string;
@@ -38,6 +39,11 @@ interface DispatchRequest {
 interface Dependencies {
   dispatch(request: DispatchRequest): Promise<PromptDispatchDisposition>;
   onError(error: unknown, request: DispatchRequest): void;
+  /**
+   * Format one message for its recipient; production runs the `agent.prompt` hook here.
+   * A rejection fails only that message. Defaults to the plain envelope.
+   */
+  prepare?: (input: AgentMessagePreparation) => Promise<{ prompt: AgentPromptInput }>;
   /** Return a cancellation function. Production uses the daemon's event loop. */
   schedule?: (delayMs: number, callback: () => void) => () => void;
 }
@@ -62,16 +68,11 @@ export function createAgentMessageDelivery(dependencies: Dependencies): AgentMes
   let closed = false;
   let closing: Promise<void> | undefined;
 
-  function dispatch(recipientId: string, messages: Admitted[]): void {
-    const prompts = messages.map(
-      (message) =>
-        prepareAgentMessage(message.prompt, message.source, message.receipt.messageId).prompt,
-    );
-    const prompt: AgentPromptInput = prompts.every((entry) => typeof entry === "string")
-      ? prompts.join("\n\n")
-      : prompts.flatMap((entry): AgentPromptContentBlock[] =>
-          typeof entry === "string" ? [{ type: "text", text: entry }] : entry,
-        );
+  function buildRequest(
+    recipientId: string,
+    messages: Admitted[],
+    prompt: AgentPromptInput,
+  ): DispatchRequest {
     const request: DispatchRequest = {
       recipientId,
       messageIds: messages.map((message) => message.receipt.messageId),
@@ -90,17 +91,58 @@ export function createAgentMessageDelivery(dependencies: Dependencies): AgentMes
         }
       },
     };
+    return request;
+  }
+
+  /** Messages are prepared one at a time, in order, before they are joined into one prompt. */
+  async function prepareBatch(
+    recipientId: string,
+    messages: Admitted[],
+  ): Promise<{ accepted: Admitted[]; prompts: AgentPromptInput[] }> {
+    const accepted: Admitted[] = [];
+    const prompts: AgentPromptInput[] = [];
+    for (const message of messages) {
+      try {
+        const input = {
+          recipientId,
+          prompt: message.prompt,
+          source: message.source,
+          messageId: message.receipt.messageId,
+        };
+        const prepared = dependencies.prepare
+          ? await dependencies.prepare(input)
+          : prepareAgentMessage(input.prompt, input.source, input.messageId);
+        accepted.push(message);
+        prompts.push(prepared.prompt);
+      } catch (error) {
+        // A failing hook drops this message only; the rest of the batch is still delivered.
+        message.reject(error);
+        dependencies.onError(error, buildRequest(recipientId, [message], message.prompt));
+      }
+    }
+    return { accepted, prompts };
+  }
+
+  function dispatch(recipientId: string, messages: Admitted[]): void {
     const previous = dispatching.get(recipientId) ?? Promise.resolve();
     const dispatched = previous
       .catch(() => undefined)
       .then(async () => {
+        const { accepted, prompts } = await prepareBatch(recipientId, messages);
+        if (accepted.length === 0) return undefined;
+        const prompt: AgentPromptInput = prompts.every((entry) => typeof entry === "string")
+          ? prompts.join("\n\n")
+          : prompts.flatMap((entry): AgentPromptContentBlock[] =>
+              typeof entry === "string" ? [{ type: "text", text: entry }] : entry,
+            );
+        const request = buildRequest(recipientId, accepted, prompt);
         try {
-          for (const message of messages) message.beforeDispatch?.();
+          for (const message of accepted) message.beforeDispatch?.();
           const disposition = await dependencies.dispatch(request);
-          for (const message of messages) message.resolve(disposition);
+          for (const message of accepted) message.resolve(disposition);
           return undefined;
         } catch (error) {
-          for (const message of messages) message.reject(error);
+          for (const message of accepted) message.reject(error);
           dependencies.onError(error, request);
           throw error;
         }

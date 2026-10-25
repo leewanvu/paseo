@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { createAgentMessageDelivery, parseAgentMessages } from "./index.js";
+import { createAgentMessageDelivery, parseAgentMessages, prepareAgentMessage } from "./index.js";
 import type { AgentPromptInput } from "../agent-sdk-types.js";
 
 function createClock() {
@@ -282,4 +282,71 @@ test("batches retain each sender's attachment context and image order", async ()
         .join("\n"),
     )?.map((message) => message.source?.agentId),
   ).toEqual(["one", "two"]);
+});
+
+test("the prepare hook runs per message so one batch can mix plain and enveloped messages", async () => {
+  const clock = createClock();
+  const sent: AgentPromptInput[] = [];
+  const delivery = createAgentMessageDelivery({
+    schedule: clock.schedule,
+    prepare: async (message) =>
+      message.messageId === "plain"
+        ? { prompt: String(message.prompt) }
+        : prepareAgentMessage(message.prompt, message.source, message.messageId),
+    dispatch: async (batch) => {
+      sent.push(batch.prompt);
+      return "steered";
+    },
+    onError: (error) => {
+      throw error;
+    },
+  });
+  delivery.enqueue({
+    recipientId: "parent",
+    messageId: "plain",
+    prompt: "a < b & c",
+    source: { kind: "agent-message", agentId: "worker" },
+  });
+  delivery.enqueue({
+    recipientId: "parent",
+    messageId: "wrapped",
+    prompt: "a < b",
+    source: { kind: "agent-message", agentId: "worker" },
+  });
+  clock.advance(2000);
+  await delivery.close();
+  expect(sent).toHaveLength(1);
+  const [prompt] = sent as string[];
+  expect(prompt!.startsWith("a < b & c\n\n<paseo-system ")).toBe(true);
+  expect(parseAgentMessages(prompt!.slice("a < b & c\n\n".length))).toEqual([
+    { id: "wrapped", source: { kind: "agent-message", agentId: "worker" }, text: "a < b" },
+  ]);
+});
+
+test("a failing prepare hook rejects only its message and the rest of the batch is delivered", async () => {
+  const clock = createClock();
+  const sent: AgentPromptInput[] = [];
+  const errors: unknown[] = [];
+  const delivery = createAgentMessageDelivery({
+    schedule: clock.schedule,
+    prepare: async (message) => {
+      if (message.messageId === "bad") throw new Error("hook failed");
+      return prepareAgentMessage(message.prompt, message.source, message.messageId);
+    },
+    dispatch: async (batch) => {
+      sent.push(batch.prompt);
+      return "steered";
+    },
+    onError: (error) => {
+      errors.push(error);
+    },
+  });
+  const source = { kind: "agent-message" as const, agentId: "worker" };
+  const bad = delivery.enqueue({ recipientId: "parent", messageId: "bad", prompt: "x", source });
+  const good = delivery.enqueue({ recipientId: "parent", messageId: "good", prompt: "y", source });
+  clock.advance(2000);
+  await expect(bad.dispatched).rejects.toThrow("hook failed");
+  await expect(good.dispatched).resolves.toBe("steered");
+  expect(parseAgentMessages(String(sent[0]))?.map((message) => message.id)).toEqual(["good"]);
+  expect(errors).toHaveLength(1);
 });

@@ -121,6 +121,11 @@ function renderMessageText(block: AgentPromptContentBlock): string[] {
   return [renderPromptAttachmentAsText(block)];
 }
 
+/** The body `prepareAgentMessage` wraps: text blocks and textual attachments, images excluded. */
+export function renderAgentMessageText(prompt: AgentPromptInput): string {
+  return typeof prompt === "string" ? prompt : prompt.flatMap(renderMessageText).join("\n\n");
+}
+
 export function prepareAgentMessage(
   prompt: AgentPromptInput,
   source?: AgentPromptSource,
@@ -143,7 +148,7 @@ export function prepareAgentMessage(
     }
   }
   const messageId = id ?? randomUUID();
-  const text = typeof prompt === "string" ? prompt : prompt.flatMap(renderMessageText).join("\n\n");
+  const text = renderAgentMessageText(prompt);
   // Render textual attachments before wrapping, so provider replay still contains one
   // complete envelope instead of an envelope followed by provider-rendered context.
   const envelope = formatAgentMessage({ id: messageId, source: source ?? null, text });

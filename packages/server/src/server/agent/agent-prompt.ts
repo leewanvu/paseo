@@ -1,4 +1,4 @@
-import { prepareAgentMessage, type AgentPromptSource } from "./agent-messages/index.js";
+import { prepareAgentMessageForAgent, type AgentPromptSource } from "./agent-messages/index.js";
 import type { Logger } from "pino";
 
 import type { AgentPromptInput, AgentRunOptions } from "./agent-sdk-types.js";
@@ -309,7 +309,12 @@ export async function sendPromptToAgent(
   params: SendPromptToAgentParams,
 ): Promise<{ disposition: PromptDispatchDisposition }> {
   const source = await resolvePromptSource(params.source, params.agentManager, params.agentStorage);
-  const delivery = prepareAgentMessage(params.prompt, source, params.messageId);
+  const delivery = await prepareAgentMessageForAgent(params, {
+    recipientId: params.agentId,
+    prompt: params.prompt,
+    source,
+    messageId: params.messageId,
+  });
   return sendPreparedPromptToAgent({
     ...params,
     prompt: delivery.prompt,
@@ -376,11 +381,12 @@ export async function startCreatedAgentInitialPrompt(
     return currentSnapshot;
   }
 
-  const delivery = prepareAgentMessage(
-    params.prompt,
-    await resolvePromptSource(params.source, params.agentManager, params.agentStorage),
-    params.runOptions?.clientMessageId,
-  );
+  const delivery = await prepareAgentMessageForAgent(params, {
+    recipientId: params.agentId,
+    prompt: params.prompt,
+    source: await resolvePromptSource(params.source, params.agentManager, params.agentStorage),
+    messageId: params.runOptions?.clientMessageId,
+  });
   const dispatchResult = await startAgentRun(
     params.agentManager,
     params.agentId,

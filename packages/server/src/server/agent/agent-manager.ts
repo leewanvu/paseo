@@ -1,7 +1,7 @@
 import { projectTimelineRows } from "./timeline-projection.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
-import type { PluginSessionOpenRequest } from "@getpaseo/plugin/server";
+import type { PluginAgentPromptRequest, PluginSessionOpenRequest } from "@getpaseo/plugin/server";
 import { randomUUID } from "node:crypto";
 import { basename, resolve } from "node:path";
 import { stat } from "node:fs/promises";
@@ -1327,6 +1327,14 @@ export class AgentManager {
       });
     }
     return agent;
+  }
+
+  hasAgentPromptHook(): boolean {
+    return this.pluginLifecycle?.hasBefore?.("agent.prompt") ?? false;
+  }
+
+  async beforeAgentPrompt(request: PluginAgentPromptRequest): Promise<PluginAgentPromptRequest> {
+    return this.pluginLifecycle ? this.pluginLifecycle.before("agent.prompt", request) : request;
   }
 
   private buildCreateSessionOptions(options?: {

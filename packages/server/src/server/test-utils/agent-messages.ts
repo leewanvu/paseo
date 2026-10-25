@@ -1,4 +1,7 @@
-import { createAgentMessageDelivery } from "../agent/agent-messages/index.js";
+import {
+  createAgentMessageDelivery,
+  prepareAgentMessageForAgent,
+} from "../agent/agent-messages/index.js";
 import {
   sendPreparedPromptToAgent,
   waitForAgentRunStartWithTimeout,
@@ -14,6 +17,7 @@ export function createTestAgentMessages(params: {
   logger: Logger;
 }) {
   return createAgentMessageDelivery({
+    prepare: (message) => prepareAgentMessageForAgent(params, message),
     schedule: (_delay, callback) => {
       const timer = setTimeout(callback, 0);
       return () => clearTimeout(timer);

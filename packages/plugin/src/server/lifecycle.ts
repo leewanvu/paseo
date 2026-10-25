@@ -39,6 +39,30 @@ export interface PluginSessionOpenRequest {
   env: Record<string, string>;
 }
 
+export type PluginAgentPromptSource =
+  | { kind: "agent-message"; agentId: string; title: string | null; serverId: string | null }
+  | {
+      kind: "agent-notification";
+      agentId: string;
+      title: string | null;
+      serverId: string | null;
+      event: "finished" | "errored" | "permission-required" | "closed";
+    };
+
+/**
+ * An agent-originated prompt before it is formatted for the recipient. Only `text`
+ * and `delivery` can be changed by a hook.
+ */
+export interface PluginAgentPromptRequest {
+  /** The recipient. */
+  agent: PluginHookAgent;
+  source: PluginAgentPromptSource;
+  /** Raw, unescaped body. Text attachments are already rendered into it; images bypass the hook. */
+  text: string;
+  /** "envelope" wraps the text in <paseo-system>; "plain" delivers `text` as an ordinary prompt. */
+  delivery: "envelope" | "plain";
+}
+
 export type PluginTurnOutcome =
   | { kind: "completed" }
   | { kind: "failed"; error: { message: string; code?: string } }
@@ -72,6 +96,7 @@ export interface PluginLifecycleEvents {
 export interface PluginBeforeRequests {
   "agent.create": { config: AgentSessionConfig; env?: Record<string, string> };
   "agent.session_open": PluginSessionOpenRequest;
+  "agent.prompt": PluginAgentPromptRequest;
   "workspace.create": Omit<WorkspaceCreateRequest, "type" | "requestId">;
 }
 

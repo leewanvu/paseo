@@ -546,6 +546,10 @@ export class PluginRuntime {
     await Promise.all(this.pendingEvents);
   }
 
+  hasBefore(name: keyof PluginBeforeRequests): boolean {
+    return [...this.plugins.values()].some((loaded) => loaded.hooks.before.includes(name));
+  }
+
   async before<Name extends keyof PluginBeforeRequests>(
     name: Name,
     input: PluginBeforeRequests[Name],

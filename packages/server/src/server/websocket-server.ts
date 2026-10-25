@@ -1,6 +1,7 @@
 import { type WorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import {
   createAgentMessageDelivery,
+  prepareAgentMessageForAgent,
   type AgentMessageDelivery,
 } from "./agent/agent-messages/index.js";
 import {
@@ -708,6 +709,7 @@ export class VoiceAssistantWebSocketServer {
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
     this.agentMessages = createAgentMessageDelivery({
+      prepare: (message) => prepareAgentMessageForAgent({ agentManager, agentStorage }, message),
       dispatch: async (batch) => {
         const { disposition } = await sendPreparedPromptToAgent({
           agentManager,

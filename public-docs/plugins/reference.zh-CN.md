@@ -745,6 +745,7 @@ type PluginTurnOutcome =
 | -------------------- | ----------------------------------------------------------------------- | ----------------------------------- |
 | `agent.create`       | `config`，可选的 `env`                                                  | 除 `cwd` 外的公开 Agent 配置；`env` |
 | `agent.session_open` | `agentId`, `workspaceId`, `provider`, `cwd`, `reason`, `purpose`, `env` | 仅 `env`                            |
+| `agent.prompt`       | `agent`, `source`, `text`, `delivery`                                   | 仅 `text` 和 `delivery`             |
 | `workspace.create`   | `source`，可选的 `title`，`firstAgentContext`                           | 整个显式创建请求                    |
 
 **`agent.create.config`** 使用 `AgentSessionConfig`：
@@ -778,6 +779,26 @@ type PluginTurnOutcome =
 | `reason`      | `create`、`resume`、`refresh`、`import`                                              |
 | `purpose`     | `interactive`、`history`                                                             |
 | `env`         | 启动覆盖映射；不包括 daemon 继承的环境变量。替换整个映射即可添加、替换或移除覆盖项。 |
+
+**`agent.prompt`** 对一个 Agent 发给另一个 Agent 的每条提示运行，发生在 Paseo 将其包装进 `<paseo-system>` 信封之前：`send_agent_prompt`（包括排队投递）、`create_agent` 的初始提示，以及完成、出错和权限通知。人类提示和计划任务触发不会运行它。
+
+```ts
+server.before("agent.prompt", ({ request }) => {
+  if (!request.agent.provider.startsWith("eslepe-")) return;
+  return { ...request, delivery: "plain" };
+});
+```
+
+| 字段       | 取值                                                                                                |
+| ---------- | --------------------------------------------------------------------------------------------------- |
+| `agent`    | 接收方：`id`、`workspaceId`、`parentAgentId`、`provider`、`cwd`、`title`                            |
+| `source`   | `kind`（`agent-message` 或 `agent-notification`）、`agentId`、`title`、`serverId`，通知另有 `event` |
+| `text`     | 未转义的原始正文。文本附件已渲染进其中；图片块不经过该钩子                                          |
+| `delivery` | `envelope`（默认）包装 `text`；`plain` 将 `text` 作为普通提示发送，记录并显示为用户消息             |
+
+修改 `agent` 或 `source` 会失败。未注册 `agent.prompt` 钩子时，提示原样投递。排队消息在合并前按顺序逐条处理，因此同一批次可以混合 plain 与 envelope 消息。
+
+钩子抛错或超时时，该提示不会投递。直接发送和初始提示会以该错误失败；排队批次中只有这一条被拒绝，其余照常投递；通知由其订阅重试。不要在回调内等待向同一接收方的发送。
 
 ### 顺序与返回值 {#ordering-and-returned-values}
 
@@ -819,7 +840,7 @@ Creation request
 
 | 插件                                                                                                   | 包含                                                   |
 | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| [lifecycle-logger](https://github.com/getpaseo/paseo/tree/main/plugin-examples/lifecycle-logger)       | 全部十一个钩子；隐去环境变量值的 JSON 日志             |
+| [lifecycle-logger](https://github.com/getpaseo/paseo/tree/main/plugin-examples/lifecycle-logger)       | 全部十二个钩子；隐去环境变量值的 JSON 日志             |
 | [lifecycle-actions](https://github.com/getpaseo/paseo/tree/main/plugin-examples/lifecycle-actions)     | 后续消息、权限、环境变量、切换 Provider、选择 worktree |
 | [agent-configuration](https://github.com/getpaseo/paseo/tree/main/plugin-examples/agent-configuration) | MCP 注入以及 Codex 沙盒/批准选项                       |
 

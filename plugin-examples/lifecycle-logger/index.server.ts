@@ -25,6 +25,11 @@ export default function contribute(server: PluginServerContext) {
     return request;
   });
 
+  server.before("agent.prompt", ({ request }) => {
+    logHook("before agent.prompt", { request });
+    return request;
+  });
+
   server.on("agent.created", (event) => {
     logHook("agent.created", event);
   });
