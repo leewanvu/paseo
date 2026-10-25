@@ -159,3 +159,35 @@ test("a failing hook rejects the preparation", async () => {
     prepareAgentMessageForAgent(dependencies, { ...input, prompt: "x", source: message }),
   ).rejects.toThrow("hook failed");
 });
+
+test("plain delivery without an input id still returns a message id", async () => {
+  const { dependencies } = setup((request) => ({ ...request, delivery: "plain" }));
+  const prepared = await prepareAgentMessageForAgent(dependencies, {
+    recipientId: "recipient",
+    prompt: body,
+    source: message,
+  });
+  expect(prepared.prompt).toBe(body);
+  expect(prepared.messageId).toEqual(expect.any(String));
+});
+
+test("plain delivery with empty text is an invalid hook result unless images remain", async () => {
+  const { dependencies } = setup((request) => ({ ...request, delivery: "plain", text: "" }));
+  await expect(
+    prepareAgentMessageForAgent(dependencies, { ...input, prompt: "x", source: message }),
+  ).rejects.toThrow("empty text");
+  await expect(
+    prepareAgentMessageForAgent(dependencies, {
+      ...input,
+      prompt: [{ type: "text", text: "x" }],
+      source: message,
+    }),
+  ).rejects.toThrow("empty text");
+  const image = { type: "image" as const, data: "AAAA", mimeType: "image/png" };
+  const prepared = await prepareAgentMessageForAgent(dependencies, {
+    ...input,
+    prompt: [{ type: "text", text: "x" }, image],
+    source: message,
+  });
+  expect(prepared.prompt).toEqual([image]);
+});

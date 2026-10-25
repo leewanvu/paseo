@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { PluginAgentPromptRequest } from "@getpaseo/plugin/server";
 import type { AgentManager } from "../agent-manager.js";
 import type { AgentStorage } from "../agent-storage.js";
@@ -70,8 +71,14 @@ export async function prepareAgentMessageForAgent(
   });
   const prompt = result.text === text ? input.prompt : withText(input.prompt, result.text);
   if (result.delivery === "plain") {
+    const plain = withText(input.prompt, result.text);
+    // The provider must never receive an empty prompt; an images-only prompt keeps its images.
+    if (typeof plain === "string" ? plain.trim() === "" : plain.length === 0) {
+      throw new Error("agent.prompt hook returned empty text for plain delivery");
+    }
     // Plain text goes through the human path, so a body that looks like an envelope is quoted.
-    return prepareAgentMessage(withText(input.prompt, result.text), undefined, input.messageId);
+    // Agent-originated prompts always carry a message id, as the envelope path does.
+    return prepareAgentMessage(plain, undefined, input.messageId ?? randomUUID());
   }
   return prepareAgentMessage(prompt, source, input.messageId);
 }
